@@ -1,0 +1,30 @@
+# The sandbox each Pi agent works in. Build context: harness/container/.
+# Replaces upstream's Containerfile.agent (Claude Code) with Pi; the base image, data,
+# Playwright and agent-browser are the same as upstream.
+ARG BASE=pokedex-base
+FROM ${BASE}
+
+ARG PI_VERSION=1.4.0
+ARG AGENT_BROWSER_VERSION=0.39.2
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ripgrep \
+ && rm -rf /var/lib/apt/lists/*
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
+ && npm install -g agent-browser@${AGENT_BROWSER_VERSION}
+
+USER agent
+# PI_OFFLINE stops pi refreshing its model catalog from pi.dev, so every run uses the catalog
+# bundled with PI_VERSION. It doesn't affect model calls, MCP or tools.
+ENV PI_CODING_AGENT_DIR=/home/agent/.pi/agent \
+    PI_TELEMETRY=0 \
+    PI_SKIP_VERSION_CHECK=1 \
+    PI_OFFLINE=1
+# agent-browser ships no Chrome for linux/arm64; a failed install is recorded, not fatal.
+RUN agent-browser install || echo "agent-browser install failed on $(uname -m)" > /home/agent/agent-browser-install-failed
+
+COPY --chown=agent:agent pi/ /home/agent/.pi/agent/
+COPY --chown=agent:agent --chmod=755 run-agent.sh run-judge.sh setup-tooling.sh pin-provider.mjs /home/agent/
+COPY --chown=agent:agent --chmod=755 --from=upstream mcp-probe.sh /home/agent/
+ENTRYPOINT ["/home/agent/run-agent.sh"]

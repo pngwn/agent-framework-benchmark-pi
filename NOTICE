@@ -1,0 +1,10 @@
+agent-framework-benchmark-pi
+
+Built on agent-framework-benchmark by Nolan Lawson
+https://github.com/nolanlawson/agent-framework-benchmark (Apache-2.0), included as the
+`upstream/` git submodule. tasks/extend-team/gold/ is a modified copy of upstream's
+gold/ reference implementation.
+
+The Opus baseline numbers come from
+https://github.com/nolanlawson/agent-framework-benchmark-results, which is downloaded at
+setup time and not redistributed here.

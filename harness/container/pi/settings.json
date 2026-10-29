@@ -1,0 +1,6 @@
+{
+  "quietStartup": true,
+  "defaultThinkingLevel": "high",
+  "compaction": { "enabled": true },
+  "retry": { "enabled": true, "maxRetries": 5 }
+}

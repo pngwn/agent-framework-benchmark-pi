@@ -1,0 +1,8 @@
+node_modules/
+runs/
+.env
+.env.local
+baselines/opus-results/
+baselines/opus-analysis/
+.claude/
+.DS_Store

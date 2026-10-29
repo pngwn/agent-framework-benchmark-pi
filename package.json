@@ -1,0 +1,20 @@
+{
+  "name": "agent-framework-benchmark-pi",
+  "private": true,
+  "type": "module",
+  "description": "Pi + DeepSeek port of nolanlawson/agent-framework-benchmark, with extra code, judge and trace analyses",
+  "scripts": {
+    "bench": "node harness/run.mjs",
+    "analyze": "node analysis/analyze.mjs",
+    "judge": "node analysis/judge/judge.mjs",
+    "baselines": "node baselines/opus.mjs fetch"
+  },
+  "dependencies": {
+    "typescript": "^5.9.3"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pngwn/agent-framework-benchmark-pi.git"
+  }
+}

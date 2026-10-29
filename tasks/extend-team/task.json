@@ -1,0 +1,7 @@
+{
+  "description": "Add a team builder (client-persisted state, a new page, type-coverage logic) to an existing app.",
+  "base": "opus",
+  "prompt": "The app in app/ was built with {framework}. Add the feature described in FEATURE.md to it. Keep using the same framework and the app's conventions. Work autonomously until `npm test` passes.",
+  "feature": "FEATURE.md",
+  "tests": "tests"
+}
