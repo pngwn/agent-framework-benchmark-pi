@@ -61,7 +61,18 @@ node harness/run.mjs --task=extend-team --frameworks=all --iterations=3
 node analysis/judge/judge.mjs runs/<id>
 node analysis/judge/judge.mjs --opus            # same rubrics on the Opus apps
 node analysis/analyze.mjs runs/<id>             # re-run analyses and rewrite report.md
+
+# Flakiness: re-run each app's final tests twice more in clean containers (adds `Retests`)
+node harness/retest.mjs runs/<id> --times=2
+
+# Publish: scrubbed results (GitHub) and traces (Hugging Face), re-scanned for secrets
+node scripts/export-results.mjs runs/<id> --name=<name> --results=publish/results --traces=publish/traces
 ```
+
+The published runs were made with `--frameworks=all --iterations=5 --parallel=8 --cpus=4
+--memory=8g` (build), `--task=extend-team --iterations=3 --no-measure` (extension) and judges
+at `--per-framework=2 --samples=3` (the 2 apps nearest each framework's median size), on a
+48-thread EPYC VPS.
 
 Each run writes `runs/<id>-<task>/report.md` and `summary.json`. `node harness/run.mjs --help`
 lists every option (`--model`, `--hf-provider`, `--thinking`, `--max-turns`, `--parallel`, …).

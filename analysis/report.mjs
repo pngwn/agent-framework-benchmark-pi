@@ -38,7 +38,9 @@ function judgeScores(dir) {
     const criteria = {};
     for (const v of verdicts) for (const [k, c] of Object.entries(v.criteria ?? {})) (criteria[k] ??= []).push(Number(c.score));
     out[dim] = {
-      overall: median(verdicts.map((v) => Number(v.overall))),
+      // Judges read the overall experimental score both ways (how much vs. how well), so its
+      // headline is the anchored `reach` criterion instead.
+      overall: dim === 'experimental' && criteria.reach ? median(criteria.reach) : median(verdicts.map((v) => Number(v.overall))),
       criteria: Object.fromEntries(Object.entries(criteria).map(([k, xs]) => [k, median(xs)])),
       samples: verdicts.length,
       count: median(verdicts.map((v) => v.count).filter((x) => typeof x === 'number')),
@@ -53,6 +55,7 @@ function readIteration(dir) {
   const code = readJson(path.join(dir, 'analysis/code.json'));
   const diff = readJson(path.join(dir, 'analysis/diff.json'));
   const finalTest = readJson(path.join(dir, 'analysis/final-test.json'));
+  const retest = readJson(path.join(dir, 'analysis/retest.json'));
   const measure = readJson(path.join(dir, 'measure/results.json'));
   const lh = (k) => measure?.lighthouse?.['home/mobile']?.median?.[k] ?? null;
   const c = code?.totals ?? {};
@@ -61,6 +64,8 @@ function readIteration(dir) {
     name: path.basename(dir),
     framework: path.basename(dir).replace(/-\d+$/, ''),
     passed: info.final_test_exit === '0',
+    retestRuns: retest?.runs ?? null,
+    retestPasses: retest?.passes ?? null,
     timedOut: fs.existsSync(path.join(dir, 'TIMED_OUT')),
     // agent
     tokens: trace?.usage.total ?? null,
@@ -131,6 +136,9 @@ function aggregate(its) {
   const row = { n: its.length, passed: its.filter((i) => i.passed).length };
   for (const k of keys) row[k] = median(its.map((i) => i[k]));
   row.verifiedAfterLastEdit = its.filter((i) => i.verifiedAfterLastEdit).length;
+  // Re-runs of the final tests (harness/retest.mjs): totals, not medians.
+  row.retestRuns = its.reduce((n, i) => n + (i.retestRuns ?? 0), 0);
+  row.retestPasses = its.reduce((n, i) => n + (i.retestPasses ?? 0), 0);
   // Like the blog post's tooling table: how many iterations used it at all.
   row.mcpRuns = its.filter((i) => i.mcpCalls > 0).length;
   row.skillRuns = its.filter((i) => i.skillReads > 0).length;
@@ -162,6 +170,9 @@ export function writeReport(runDir, { title } = {}) {
   const opusRow = (fw) => opus?.rows.find((r) => r.framework === fw);
   const vs = (fw, key, d = 0) => (opusRow(fw)?.[key] != null ? ` (${fmt(opusRow(fw)[key], d)})` : '');
   const run = config?.run ?? {};
+  // Opus was judged on its build-task apps, so its judge scores only compare with a build run.
+  const opusJudge = (fw, d) => ((run.task ?? 'build') === 'build' ? opusRow(fw)?.judge?.[d] : null);
+  const vsJudge = (fw, d, pick) => (opusJudge(fw, d) && pick(opusJudge(fw, d)) != null ? ` (${fmt(pick(opusJudge(fw, d)), 1)})` : '');
 
   const table = (heading, note, cols, filter = () => true) => {
     const rs = rows.filter(filter);
@@ -185,11 +196,12 @@ export function writeReport(runDir, { title } = {}) {
     `# ${title ?? `Pokédex benchmark: ${run.task ?? 'build'} task`}`,
     '',
     run.model ? `Model \`${run.model}\` (HF provider: ${run.hfProvider || 'auto'}), thinking \`${run.thinking}\`, pi ${run.piVersion}. ${run.iterations} iteration(s) per framework; values are medians.` : 'Values are medians across iterations.',
-    opus ? 'Values in parentheses are the Opus 5.5 medians from Nolan Lawson\'s published runs, for the build task.' : '',
+    opus ? `Values in parentheses are the Opus 5.5 medians from Nolan Lawson's published build-task runs${(run.task ?? 'build') === 'build' ? ', judged the same way' : ' (code size of the apps the extension started from)'}.` : '',
     '',
     hasTrace
-      ? table('Agent cost and page loads (upstream metrics)', 'Cost is pi\'s estimate from the model catalog prices, not an invoice. Lighthouse is the home page on mobile, as upstream.', [
+      ? table('Agent cost and page loads (upstream metrics)', '`Tests`: the final acceptance run, as upstream. `Retests`: extra runs of the same tests in clean containers (harness/retest.mjs), to tell flaky results from real ones. Cost is pi\'s estimate from the model catalog prices, not an invoice. Lighthouse is the home page on mobile, as upstream.', [
           ['Tests', (r) => `${r.passed}/${r.n}`],
+          ['Retests', (r) => (r.retestRuns ? `${r.retestPasses}/${r.retestRuns}` : '—')],
           ['Tokens (M)', (r) => fmt(r.tokens, 2, 1e-6)],
           ['Output (k)', (r) => fmt(r.outputTokens, 0, 1e-3)],
           ['Cost ($)', (r) => fmt(r.cost, 2)],
@@ -251,14 +263,14 @@ export function writeReport(runDir, { title } = {}) {
         ])
       : '',
     dims.length
-      ? table('Judge scores (1–5)', 'Median of samples, then of iterations. Experimentalness is descriptive (5 = leans heavily on experimental APIs), not better-is-higher; `n exp.` is the count of distinct experimental APIs.', dims.flatMap((d) => [
-          [d, (r) => `${fmt(r.judge[d]?.overall, 1)}${opusRow(r.framework)?.judge?.[d] ? ` (${fmt(opusRow(r.framework).judge[d].overall, 1)})` : ''}`],
-          ...(d === 'experimental' ? [['n exp.', (r) => fmt(r.judge[d]?.count)]] : []),
+      ? table('Judge scores (1–5)', `Median of samples, then of iterations.${dims.includes('experimental') ? ' Experimentalness is descriptive, not better-is-higher: it is the `reach` criterion (5 = central features rest on experimental APIs, 1 = only long-stable APIs), and `n exp.` is the count of distinct experimental APIs.' : ''}`, dims.flatMap((d) => [
+          [d, (r) => `${fmt(r.judge[d]?.overall, 1)}${vsJudge(r.framework, d, (j) => j.overall)}`],
+          ...(d === 'experimental' ? [['n exp.', (r) => `${fmt(r.judge[d]?.count)}${vsJudge(r.framework, d, (j) => j.count).replace(/\.0\)$/, ')')}`]] : []),
         ]))
       : '',
     ...dims.map((d) => {
       const crit = [...new Set(rows.flatMap((r) => Object.keys(r.judge[d]?.criteria ?? {})))];
-      return table(`Judge detail: ${d}`, '', crit.map((c) => [c, (r) => fmt(r.judge[d]?.criteria[c], 1)]), (r) => r.judge[d]);
+      return table(`Judge detail: ${d}`, '', crit.map((c) => [c, (r) => `${fmt(r.judge[d]?.criteria[c], 1)}${vsJudge(r.framework, d, (j) => j.criteria[c])}`]), (r) => r.judge[d]);
     }),
     '## Iterations',
     '',
