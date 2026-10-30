@@ -58,6 +58,9 @@ function readIteration(dir) {
   const retest = readJson(path.join(dir, 'analysis/retest.json'));
   const measure = readJson(path.join(dir, 'measure/results.json'));
   const lh = (k) => measure?.lighthouse?.['home/mobile']?.median?.[k] ?? null;
+  // Opus baseline only: Nolan's apps re-measured on the machine that measured this harness's runs.
+  const same = readJson(path.join(dir, 'measure-same-machine/results.json'));
+  const lhSame = (k) => same?.lighthouse?.['home/mobile']?.median?.[k] ?? null;
   const c = code?.totals ?? {};
   const featureFailures = finalTest?.failures.filter((f) => /team\.spec|feature/.test(f)) ?? [];
   return {
@@ -81,6 +84,10 @@ function readIteration(dir) {
     lcp: lh('lcp'),
     tbt: lh('tbt'),
     jsKiB: lh('scriptBytes') != null ? lh('scriptBytes') / 1024 : null,
+    perfSame: lhSame('performance'),
+    lcpSame: lhSame('lcp'),
+    tbtSame: lhSame('tbt'),
+    jsKiBSame: lhSame('scriptBytes') != null ? lhSame('scriptBytes') / 1024 : null,
     // code
     upstreamLoc: measure?.code?.sourceLines ?? c.upstreamLoc ?? null,
     significantLoc: c.significantLoc ?? null,
@@ -172,6 +179,7 @@ export function writeReport(runDir, { title } = {}) {
   const run = config?.run ?? {};
   // Opus was judged on its build-task apps, so its judge scores only compare with a build run.
   const opusJudge = (fw, d) => ((run.task ?? 'build') === 'build' ? opusRow(fw)?.judge?.[d] : null);
+  const vsSame = (fw, key, scale = 1) => ((run.task ?? 'build') === 'build' && opusRow(fw)?.[key] != null ? ` (${fmt(opusRow(fw)[key], 0, scale)})` : '');
   const vsJudge = (fw, d, pick) => (opusJudge(fw, d) && pick(opusJudge(fw, d)) != null ? ` (${fmt(pick(opusJudge(fw, d)), 1)})` : '');
 
   const table = (heading, note, cols, filter = () => true) => {
@@ -199,7 +207,7 @@ export function writeReport(runDir, { title } = {}) {
     opus ? `Values in parentheses are the Opus 5.5 medians from Nolan Lawson's published build-task runs${(run.task ?? 'build') === 'build' ? ', judged the same way' : ' (code size of the apps the extension started from)'}.` : '',
     '',
     hasTrace
-      ? table('Agent cost and page loads (upstream metrics)', '`Tests`: the final acceptance run, as upstream. `Retests`: extra runs of the same tests in clean containers (harness/retest.mjs), to tell flaky results from real ones. Cost is pi\'s estimate from the model catalog prices, not an invoice. Lighthouse is the home page on mobile, as upstream.', [
+      ? table('Agent cost and page loads (upstream metrics)', '`Tests`: the final acceptance run, as upstream. `Retests`: extra runs of the same tests in clean containers (harness/retest.mjs), to tell flaky results from real ones. Cost is pi\'s estimate from the model catalog prices, not an invoice. Lighthouse is the home page on mobile, as upstream' + (opus?.rows.some((r) => r.perfSame != null) && (run.task ?? 'build') === 'build' ? '; in parentheses, Opus 5.5\'s apps re-measured on the same machine.' : '.'), [
           ['Tests', (r) => `${r.passed}/${r.n}`],
           ['Retests', (r) => (r.retestRuns ? `${r.retestPasses}/${r.retestRuns}` : '—')],
           ['Tokens (M)', (r) => fmt(r.tokens, 2, 1e-6)],
@@ -207,10 +215,10 @@ export function writeReport(runDir, { title } = {}) {
           ['Cost ($)', (r) => fmt(r.cost, 2)],
           ['Time (min)', (r) => fmt(r.wallMin, 1)],
           ['Turns', (r) => fmt(r.turns)],
-          ['Perf', (r) => fmt(r.perf, 0, 100)],
-          ['LCP (ms)', (r) => fmt(r.lcp)],
-          ['TBT (ms)', (r) => fmt(r.tbt)],
-          ['JS (KiB)', (r) => fmt(r.jsKiB)],
+          ['Perf', (r) => `${fmt(r.perf, 0, 100)}${vsSame(r.framework, 'perfSame', 100)}`],
+          ['LCP (ms)', (r) => `${fmt(r.lcp)}${vsSame(r.framework, 'lcpSame')}`],
+          ['TBT (ms)', (r) => `${fmt(r.tbt)}${vsSame(r.framework, 'tbtSame')}`],
+          ['JS (KiB)', (r) => `${fmt(r.jsKiB)}${vsSame(r.framework, 'jsKiBSame')}`],
         ])
       : '',
     table('Code size: significant code vs. lines', '`LOC` is upstream\'s count. `Significant` drops CSS, config/entry boilerplate, imports, type declarations, comments and bare punctuation/closing tags. `Concepts` counts distinct framework vocabulary (package imports, ambient APIs like runes or auto-imports, template directives, file conventions).', [

@@ -90,6 +90,7 @@ function exportResults(src, dst) {
     copyTree(path.join(i, 'repo/app'), path.join(o, 'app'));
     copyTree(path.join(i, 'analysis'), path.join(o, 'analysis'), (f) => !f.endsWith('trace.md'));
     for (const f of ['results.json', 'error.txt']) copy(path.join(i, 'measure', f), path.join(o, 'measure', f));
+    for (const f of ['results.json', 'NOTE.txt']) copy(path.join(i, 'measure-same-machine', f), path.join(o, 'measure-same-machine', f));
     const judge = path.join(i, 'judge');
     if (fs.existsSync(judge)) copyTree(judge, path.join(o, 'judge'), (f) => /verdict\.(json|txt)$|verdict-error\.txt$/.test(f));
   }

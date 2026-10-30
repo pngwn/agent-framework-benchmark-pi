@@ -292,7 +292,9 @@ async function measure(iterDir) {
   log(`Measure start: ${path.basename(iterDir)}`);
   const code = await runLogged(
     RT,
-    ['run', '--rm', ...containerArgs, ...localhostNames, ...vol(repo, '/repo'), ...vol(results, '/results'), IMAGES.measure, '/repo/app', '/results', '--runs', String(config.lighthouseRuns)],
+    // --measure-env=HOST=0.0.0.0: an app that binds only to localhost can pick ::1 under Docker
+    // (whose /etc/hosts lists it), while Node's fetch in stack.mjs tries 127.0.0.1.
+    ['run', '--rm', ...containerArgs, ...localhostNames, ...String(opts['measure-env'] ?? '').split(',').filter(Boolean).flatMap((e) => ['-e', e]), ...vol(repo, '/repo'), ...vol(results, '/results'), IMAGES.measure, '/repo/app', '/results', '--runs', String(config.lighthouseRuns)],
     path.join(results, 'measure.log'),
   );
   if (code !== 0) return fail(`measure container exited with ${code}; see measure/measure.log`);
