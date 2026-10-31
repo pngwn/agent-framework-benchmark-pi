@@ -5,8 +5,9 @@
 
 A port of [nolanlawson/agent-framework-benchmark](https://github.com/nolanlawson/agent-framework-benchmark)
 ([blog post](https://nolanlawson.com/2026/10/28/the-ai-cost-of-javascript-frameworks/)) from
-Claude Code + Opus to **[Pi](https://pi.dev) + DeepSeek V4.1 Flash on Hugging Face Inference
-Providers**, so every trace is inspectable, plus analyses the original doesn't do:
+Claude Code + Opus to **[Pi](https://pi.dev) + open-weight models on Hugging Face Inference
+Providers** (published runs: DeepSeek V4.1 Flash and Kimi K3), so every trace is inspectable,
+plus analyses the original doesn't do:
 
 | | What | Where |
 | --- | --- | --- |
@@ -72,7 +73,7 @@ node scripts/export-results.mjs runs/<id> --name=<name> --results=publish/result
 The published runs were made with `--frameworks=all --iterations=5 --parallel=8 --cpus=4
 --memory=8g` (build), `--task=extend-team --iterations=3 --no-measure` (extension) and judges
 at `--per-framework=2 --samples=3` (the 2 apps nearest each framework's median size), on a
-48-thread EPYC VPS.
+48-thread EPYC VPS. The Kimi K3 build added `--model=moonshotai/Kimi-K3 --hf-provider=deepinfra`.
 
 Each run writes `runs/<id>-<task>/report.md` and `summary.json`. `node harness/run.mjs --help`
 lists every option (`--model`, `--hf-provider`, `--thinking`, `--max-turns`, `--parallel`, …).
@@ -88,19 +89,20 @@ Changed, because the harness is different:
 
 | | Upstream (Claude Code) | Here (Pi) |
 | --- | --- | --- |
-| Model | `claude-opus-5-5`, `--effort high` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` pinned to one HF provider (`together`), `--thinking high` |
+| Model | `claude-opus-5-5`, `--effort high` | Default `deepseek-ai/DeepSeek-V4.1-Flash-1017`, pinned to one HF provider (default `together`), `--thinking high`; the published Kimi K3 run is `moonshotai/Kimi-K3` on `deepinfra` |
 | Tools | Claude Code's built-ins (incl. WebSearch, WebFetch, subagents) | Pi's `read, bash, edit, write` + `web_search`, `web_fetch` (Exa, `harness/container/pi/extensions/web.ts`) |
 | MCP | `--mcp-config`, tools declared directly | Pi's built-in MCP, `exposure: "direct"` so tools are declared directly too (Pi's default hides them behind a scripting tool) |
 | Skills | `.claude/skills` via `skills add -a claude-code` | `.agents/skills` via `skills add -a pi`, loaded with `--approve` |
 | SvelteKit plugin | MCP + skills + subagent + LSP | MCP + skills (Pi has no subagents; the LSP needs a binary the original image didn't have either) |
 | Stop condition | Claude Code finishes; 240 min timeout | Pi finishes; 240 min timeout; 500-turn cap (`run-guard.ts`; Pi has none) |
+| Empty completions | n/a | `run-guard.ts` turns a completion with no text or tool call into a provider error, so Pi's auto-retry re-sends the request instead of ending the run. together returned these for Kimi K3 on ~8% of requests, sometimes 5 times running for the same request, so the Kimi grid ran on deepinfra (0 retries) |
 | Bash timeout | 2 min default, 10 min max | 5 min default, 10 min max (`run-guard.ts`). Pi's bash otherwise waits forever: an early grid run hung for 11+ min on a busy-looping script. 5 min rather than 2 because Pi's tool description tells the model there is no default |
 | Runtime | Podman | Docker (default) or Podman, `--runtime` |
 | Agent outputs | Written to a host mount (`/out`) | Written inside the container and copied out with `cp` after it exits; the agent has no writable host mount. An agent that hit a full disk used `df`, found the old `/out` mount and moved the 1.5 GB dataset onto the host through it |
 | Images | Anthropic API downsizes to ≤1568 px | Capped to 1568 px / 400 KB in `models.json` (`pin-provider.mjs`): HF providers reject request bodies over a few MB (together: 413 at ~4–5 MB), which otherwise forces overflow compactions after a handful of screenshot reads |
 | Image history | All images stay in the request | `image-budget.ts`: when images in a request pass 2.5 MB, the oldest are replaced by a placeholder naming the file, down to 1.5 MB (batched, so the prompt cache survives). The 1M-token context is never the limit; the provider's request-body limit is: one run hit 413 at ~200k tokens with 28 screenshots = 4.8 MB of a 5.5 MB request, and 3 of the first 21 grid runs were forced into compactions |
 | Measure DNS | Ubuntu host resolves `*.localhost` | `--add-host` for `app.localhost` / `api.localhost` (Docker's DNS doesn't, so SSR apps returned 500) |
-| Cost | Claude Code's API-price report | Pi's estimate from its catalog prices (HF providers often report no cache reads, so cached input is billed as input) |
+| Cost | Claude Code's API-price report | Pi's estimate from its catalog prices, which charge cached input at $0. Not an invoice: for DeepSeek on together, HF billed about half of Pi's estimate |
 
 ## Layout
 
@@ -149,8 +151,10 @@ verification quality.
 
 **Judges** run Pi read-only (`read, grep, find, ls, web_search, web_fetch` + the framework's
 docs MCP and skills, exactly as the agent had them) with an anchored 1–5 rubric. Every score
-must cite `app/<file>:<line>` evidence. Default model `zai-org/GLM-5.3`: a different model
-family from the agent, to avoid self-preference. Static-analysis facts are put in the prompt
+must cite `app/<file>:<line>` evidence. Default model `zai-org/GLM-5.3` on `together`: a
+different model family from the agent, to avoid self-preference. The router's responses name
+that model, but HF billing listed the published runs' judge calls as `zai-org/GLM-5.3-Flash`, at
+a total that fits Flash's price, so the judge may have been GLM-5.3-Flash. Static-analysis facts are put in the prompt
 so the judge doesn't miscount.
 
 ## Caveats
@@ -168,8 +172,9 @@ so the judge doesn't miscount.
 - DeepSeek edits files mostly through bash (`python3 - <<'PY' ... write_text`, `sed -i`)
   rather than Pi's `edit` tool, so tool-level edit metrics undercount; the trace analysis
   counts bash writes separately (`Bash writes`) and uses both for fix cycles.
-- Judges cost more than agents: about $0.07–0.13 per verdict with GLM-5.3, so 6 dimensions x
-  3 samples is roughly $1.80 per app, against about $0.20 for a DeepSeek build run.
+- Judges can cost more than agents. Pi estimates $0.07–0.13 per verdict with GLM-5.3 (6
+  dimensions x 3 samples is roughly $1.80 per app), but HF billed the DeepSeek runs' ~1,000
+  verdicts at $20.27, about $0.02 each; a DeepSeek build run was billed at roughly $0.07.
 
 ## Smoke test (2026-10-29, Apple Silicon, Docker Desktop)
 

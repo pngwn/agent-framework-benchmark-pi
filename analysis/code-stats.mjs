@@ -36,6 +36,13 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.output', '
 const TEST_FILE = /(\.(test|spec)\.[cm]?[jt]sx?$)|(^|\/)(__tests__|tests?|e2e)\//;
 const CONFIG_FILE = /(^|\/)([\w.-]+\.config\.[cm]?[jt]s|[\w.-]+\.d\.ts|entry[.-](client|server|ssr|dev|preview|express|node|bun|deno)\.[jt]sx?|vite-env\.d\.ts|app\.html|polyfills?\.[jt]s)$/;
 const GENERATED = /automatically generated|auto-generated|@generated|do not edit/i;
+// Bundler output and vendored minified libraries (an app without a .gitignore leaves Qwik's
+// server/ build in the file set; htmx.min.js copied into static/): hand-written source
+// averages ~30 characters a line, these 1,500+.
+const minified = (text) => {
+  const lines = text.split('\n').filter((l) => l.trim());
+  return lines.length > 0 && text.length / lines.length > 300;
+};
 
 // ---------- globals, so ambient framework APIs can be told apart from the platform ----------
 
@@ -261,7 +268,7 @@ export function codeStats(appDir) {
     let kind = 'source';
     if (TEST_FILE.test(rel)) kind = 'test';
     else if (provided && text.trim() === provided) kind = 'provided';
-    else if (GENERATED.test(text.slice(0, 500))) kind = 'generated';
+    else if (GENERATED.test(text.slice(0, 500)) || minified(text)) kind = 'generated';
     else if (CONFIG_FILE.test(rel)) kind = 'config';
     else if (/\.(css|scss)$/.test(rel)) kind = 'style';
 
